@@ -15,6 +15,7 @@ IMAP_PORT = 993
 class EmailClient(QWidget):
     def __init__(self, username, password, parent=None):
         super().__init__(parent)
+        self.setWindowTitle('Email Client')
 
         self.username = username
         self.password = password
@@ -28,11 +29,14 @@ class EmailClient(QWidget):
         self.sentLayout = QVBoxLayout()
         self.inboxLayout = QVBoxLayout()
 
-        self.toLabel = QLabel('To:')
+        self.toLabel = QLabel()
+        self.toLabel.setText(f'<b>To:</b>')
         self.toField = QLineEdit('tommikulevich@gmail.com')
-        self.subjectLabel = QLabel('Subject:')
+        self.subjectLabel = QLabel()
+        self.subjectLabel.setText(f'<b>Subject:</b>')
         self.subjectField = QLineEdit('Attempt to send (educational purposes)')
-        self.messageLabel = QLabel('Message:')
+        self.messageLabel = QLabel()
+        self.messageLabel.setText(f'<b>Message:</b>')
         self.messageField = QTextEdit('WNO classes at Gdańsk University of Technology')
         self.sendButton = QPushButton('Send')
 
@@ -82,12 +86,12 @@ class EmailClient(QWidget):
         # Connect, login and send with SMTP
         try:
             print("Connecting to server...")
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-                server.starttls()
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as serverSMPT:
+                serverSMPT.starttls()
                 print("Trying to login...")
-                server.login(self.username, self.password)
+                serverSMPT.login(self.username, self.password)
                 print("Sending email...")
-                server.send_message(message)
+                serverSMPT.send_message(message)
         except smtplib.SMTPAuthenticationError as e:
             print(f'SMTP Authentication Error: {e}')
         except smtplib.SMTPConnectError as e:
@@ -98,9 +102,9 @@ class EmailClient(QWidget):
             print('Email sent successfully!')
 
             try:
-                with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as server:
-                    server.login(self.username, self.password)
-                    server.append('Sent', None, imaplib.Time2Internaldate(time.time()), str(message).encode('utf-8'))
+                with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as serverIMAP:
+                    serverIMAP.login(self.username, self.password)
+                    serverIMAP.append('Sent', None, imaplib.Time2Internaldate(time.time()), str(message).encode('utf-8'))
                     print("Added to Sent")
             except imaplib.IMAP4.error as e:
                 print(f'IMAP Error: {e}')
@@ -108,37 +112,92 @@ class EmailClient(QWidget):
         # Refresh sent list
         self.refreshSentList()
 
-    # Get sent emails using IMAP (subjects only)
+    # Get sent emails using IMAP
     def refreshSentList(self):
-        with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as server:
-            server.login(self.username, self.password)
-            server.select('Sent')
-            status, messages = server.search(None, 'ALL')
+        with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as serverIMAP:
+            serverIMAP.login(self.username, self.password)
+            serverIMAP.select('Sent')
+            status, messages = serverIMAP.search(None, 'ALL')
             self.sentList.clear()
 
             for num in messages[0].split():
-                status, message = server.fetch(num, '(RFC822)')
+                status, message = serverIMAP.fetch(num, '(RFC822)')
                 emailMessage = email.message_from_bytes(message[0][1])
                 subject = emailMessage['Subject']
-                self.sentList.addItem(subject)
 
-    # Get inbox emails using IMAP (subjects only)
+                item = QListWidgetItem(f'{subject}')
+                item.email = emailMessage
+                item.from_ = emailMessage['From']
+                item.to = emailMessage['To']
+                self.sentList.addItem(item)
+
+            self.sentList.itemDoubleClicked.connect(self.showEmail)
+
+    # Get inbox emails using IMAP
     def refreshInboxList(self):
-        with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as server:
-            server.login(self.username, self.password)
-            server.select('inbox')
-            status, messages = server.search(None, 'ALL')
+        with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as serverIMAP:
+            serverIMAP.login(self.username, self.password)
+            serverIMAP.select('inbox')
+            status, messages = serverIMAP.search(None, 'ALL')
             self.inboxList.clear()
 
             keyword = self.keywordField.text().lower()  # Get keyword from field
 
             for num in messages[0].split():
-                status, message = server.fetch(num, '(RFC822)')
+                status, message = serverIMAP.fetch(num, '(RFC822)')
                 emailMessage = email.message_from_bytes(message[0][1])
                 subject = emailMessage['Subject']
 
                 if keyword in subject.lower():  # Search by keyword
-                    self.inboxList.addItem(subject)
+                    item = QListWidgetItem(f'{subject}')
+                    item.email = emailMessage
+                    item.from_ = emailMessage['From']
+                    item.to = emailMessage['To']
+                    self.inboxList.addItem(item)
+
+                self.inboxList.itemDoubleClicked.connect(self.showEmail)
+
+    @staticmethod
+    def showEmail(item):
+        emailMessage = item.email
+        from_ = emailMessage['From']
+        to = emailMessage['To']
+        subject = emailMessage['Subject']
+        body = ''
+
+        if emailMessage.is_multipart():
+            for part in emailMessage.walk():
+                contentType = part.get_content_type()
+                contentDisp = str(part.get("Content-Disposition"))
+
+                if "attachment" not in contentDisp:
+                    if "text/plain" in contentType:
+                        body = part.get_payload(decode=True).decode()
+                    elif "text/html" in contentType:
+                        body = part.get_payload(decode=True).decode()
+
+        else:
+            body = emailMessage.get_payload(decode=True).decode()
+
+        window = QDialog()
+        window.setWindowTitle(subject)
+
+        fromLabel = QLabel()
+        fromLabel.setText(f'<b>From:</b> {from_}')
+        toLabel = QLabel()
+        toLabel.setText(f'<b>To:</b> {to}')
+        subjectLabel = QLabel()
+        subjectLabel.setText(f'<b>Subject:</b> {subject}')
+        bodyLabel = QLabel(body)
+
+        layout = QVBoxLayout()
+        layout.addWidget(fromLabel)
+        layout.addWidget(toLabel)
+        layout.addWidget(subjectLabel)
+        layout.addWidget(bodyLabel)
+        window.setLayout(layout)
+
+        window.exec()
 
 
 if __name__ == '__main__':
