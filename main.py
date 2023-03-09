@@ -179,17 +179,8 @@ class EmailClient(QWidget):
             message['To'] = sender
 
             try:
-                print("Connecting to server...")
-                with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as serverSMPT:
-                    serverSMPT.starttls()
-                    print("Trying to login...")
-                    serverSMPT.login(self.username, self.password)
-                    print("Sending email...")
-                    serverSMPT.send_message(message)
-            except smtplib.SMTPAuthenticationError as e:
-                print(f'SMTP Authentication Error: {e}')
-            except smtplib.SMTPConnectError as e:
-                print(f'SMTP Connection Error: {e}')
+                print("Sending email...")
+                self.serverSMPT.send_message(message)
             except smtplib.SMTPException as e:
                 print(f'SMTP Exception: {e}')
             else:
