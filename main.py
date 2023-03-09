@@ -4,10 +4,12 @@ import smtplib
 import imaplib
 import time
 from email.mime.text import MIMEText
-from PySide6.QtGui import QIcon, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import *
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from sentence_transformers import SentenceTransformer, util
+
 
 SMTP_SERVER = 'smtp.poczta.onet.pl'
 SMTP_PORT = 587
@@ -23,6 +25,7 @@ class EmailClient(QWidget):
 
         self.username = username
         self.password = password
+        self.model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
 
         self.serverSMTP = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         self.serverSMTP.starttls()
@@ -139,7 +142,8 @@ class EmailClient(QWidget):
 
         self.serverIMAP.select('inbox')
         status, messages = self.serverIMAP.search(None, 'ALL')
-        keyword = self.keywordField.text().lower()  # Get keyword from field
+        # keyword = self.keywordField.text().lower()  # Get keyword from field
+        keyword = self.keywordField.text()  # Get keyword from field
 
         # Check if new messages have arrived, then send autoresponse
         newMessagesNum = len(messages[0].split())
@@ -155,7 +159,15 @@ class EmailClient(QWidget):
             subject = self.decodeUTF8(subject)
 
             # Intelligent filtering by keyword
-            if keyword in subject.lower():
+            if keyword:
+                keywordSentence = self.model.encode(keyword, convert_to_tensor=True)
+                subjectSentence = self.model.encode(subject, convert_to_tensor=True)
+                scoreCosSim = util.pytorch_cos_sim(keywordSentence, subjectSentence)
+                score = scoreCosSim.item()
+            else:
+                score = 1
+
+            if score > 0.45:
                 item = QListWidgetItem(f'{subject}')
                 item.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
                 item.email = emailMessage
