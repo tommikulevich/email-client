@@ -22,6 +22,14 @@ class EmailClient(QWidget):
 
         self.username = username
         self.password = password
+
+        self.serverSMTP = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        self.serverSMTP.starttls()
+        self.serverSMTP.login(self.username, self.password)
+
+        self.serverIMAP = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+        self.serverIMAP.login(self.username, self.password)
+
         self.actualMessagesNum = self.getInitMessageNum()
 
         self.tabs = QTabWidget()
@@ -86,11 +94,9 @@ class EmailClient(QWidget):
 
     # Count messages when user starts client
     def getInitMessageNum(self):
-        with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as serverIMAP:
-            serverIMAP.login(self.username, self.password)
-            serverIMAP.select('inbox')
-            status, messages = serverIMAP.search(None, 'ALL')
-            return len(messages[0].split())
+        self.serverIMAP.select('inbox')
+        status, messages = self.serverIMAP.search(None, 'ALL')
+        return len(messages[0].split())
 
     # Timer to refresh email lists
     def startTimer(self):
@@ -104,20 +110,51 @@ class EmailClient(QWidget):
 
     # Get sent emails using IMAP
     def refreshSentList(self):
-        with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as serverIMAP:
-            self.sentList.clear()
+        self.sentList.clear()
 
-            serverIMAP.login(self.username, self.password)
-            serverIMAP.select('Sent')
-            status, messages = serverIMAP.search(None, 'ALL')
+        self.serverIMAP.select('Sent')
+        status, messages = self.serverIMAP.search(None, 'ALL')
 
-            items = []
-            for num in messages[0].split():
-                status, message = serverIMAP.fetch(num, '(RFC822)')
-                emailMessage = email.message_from_bytes(message[0][1])
-                subject = emailMessage['Subject']
-                subject = self.decodeSubject(subject)
+        items = []
+        for num in messages[0].split():
+            status, message = self.serverIMAP.fetch(num, '(RFC822)')
+            emailMessage = email.message_from_bytes(message[0][1])
+            subject = emailMessage['Subject']
+            subject = self.decodeSubject(subject)
 
+            item = QListWidgetItem(f'{subject}')
+            item.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
+            item.email = emailMessage
+            item.from_ = emailMessage['From']
+            item.to = emailMessage['To']
+
+            items.append(item)
+
+        for item in items[::-1]:
+            self.sentList.addItem(item)
+
+    # Get inbox emails using IMAP
+    def refreshInboxList(self):
+        self.inboxList.clear()
+
+        self.serverIMAP.select('inbox')
+        status, messages = self.serverIMAP.search(None, 'ALL')
+        keyword = self.keywordField.text().lower()  # Get keyword from field
+
+        # Check if new messages have arrived, then send autoresponse
+        newMessagesNum = len(messages[0].split())
+        if newMessagesNum > self.actualMessagesNum:
+            self.sendAutoresponse(messages)
+            self.actualMessagesNum = newMessagesNum  # Update the number of actual messages
+
+        items = []
+        for num in messages[0].split():
+            status, message = self.serverIMAP.fetch(num, '(RFC822)')
+            emailMessage = email.message_from_bytes(message[0][1])
+            subject = emailMessage['Subject']
+            subject = self.decodeSubject(subject)
+
+            if keyword in subject.lower():  # Search by keyword
                 item = QListWidgetItem(f'{subject}')
                 item.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
                 item.email = emailMessage
@@ -126,48 +163,13 @@ class EmailClient(QWidget):
 
                 items.append(item)
 
-            for item in items[::-1]:
-                self.sentList.addItem(item)
-
-    # Get inbox emails using IMAP
-    def refreshInboxList(self):
-        with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as serverIMAP:
-            self.inboxList.clear()
-
-            serverIMAP.login(self.username, self.password)
-            serverIMAP.select('inbox')
-            status, messages = serverIMAP.search(None, 'ALL')
-            keyword = self.keywordField.text().lower()  # Get keyword from field
-
-            # Check if new messages have arrived, then send autoresponse
-            newMessagesNum = len(messages[0].split())
-            if newMessagesNum > self.actualMessagesNum:
-                self.sendAutoresponse(messages, serverIMAP)
-                self.actualMessagesNum = newMessagesNum  # Update the number of actual messages
-
-            items = []
-            for num in messages[0].split():
-                status, message = serverIMAP.fetch(num, '(RFC822)')
-                emailMessage = email.message_from_bytes(message[0][1])
-                subject = emailMessage['Subject']
-                subject = self.decodeSubject(subject)
-
-                if keyword in subject.lower():  # Search by keyword
-                    item = QListWidgetItem(f'{subject}')
-                    item.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
-                    item.email = emailMessage
-                    item.from_ = emailMessage['From']
-                    item.to = emailMessage['To']
-
-                    items.append(item)
-
-            for item in items[::-1]:
-                self.inboxList.addItem(item)
+        for item in items[::-1]:
+            self.inboxList.addItem(item)
 
     # Send autoresponse
-    def sendAutoresponse(self, messages, serverIMAP):
+    def sendAutoresponse(self, messages):
         for num in messages[0].split()[self.actualMessagesNum:]:
-            status, message = serverIMAP.fetch(num, '(RFC822)')
+            status, message = self.serverIMAP.fetch(num, '(RFC822)')
             emailMessage = email.message_from_bytes(message[0][1])
             sender = email.utils.parseaddr(emailMessage['From'])[1]
 
@@ -254,28 +256,16 @@ class EmailClient(QWidget):
 
         # Connect, login and send with SMTP
         try:
-            print("Connecting to server...")
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as serverSMPT:
-                serverSMPT.starttls()
-                print("Trying to login...")
-                serverSMPT.login(self.username, self.password)
-                print("Sending email...")
-                serverSMPT.send_message(message)
-        except smtplib.SMTPAuthenticationError as e:
-            print(f'SMTP Authentication Error: {e}')
-        except smtplib.SMTPConnectError as e:
-            print(f'SMTP Connection Error: {e}')
+            print("Sending email...")
+            self.serverSMPT.send_message(message)
         except smtplib.SMTPException as e:
             print(f'SMTP Exception: {e}')
         else:
             print('Email sent successfully!')
 
             try:
-                with imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT) as serverIMAP:
-                    serverIMAP.login(self.username, self.password)
-                    serverIMAP.append('Sent', None, imaplib.Time2Internaldate(time.time()),
-                                      str(message).encode('utf-8'))
-                    print("Added to Sent")
+                self.serverIMAP.append('Sent', None, imaplib.Time2Internaldate(time.time()), str(message).encode('utf-8'))
+                print("Added to Sent")
             except imaplib.IMAP4.error as e:
                 print(f'IMAP Error: {e}')
 
