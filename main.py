@@ -4,9 +4,10 @@ import smtplib
 import imaplib
 import time
 from email.mime.text import MIMEText
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import *
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 SMTP_SERVER = 'smtp.poczta.onet.pl'
 SMTP_PORT = 587
@@ -29,7 +30,6 @@ class EmailClient(QWidget):
 
         self.serverIMAP = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
         self.serverIMAP.login(self.username, self.password)
-
         self.actualMessagesNum = self.getInitMessageNum()
 
         self.tabs = QTabWidget()
@@ -73,7 +73,7 @@ class EmailClient(QWidget):
         self.tabs.addTab(self.sentTab, 'Sent')
         self.tabs.addTab(self.newMailTab, 'New email')
 
-        self.keywordLabel = QLabel('Find:')
+        self.keywordLabel = QLabel('Filter:')
         self.keywordField = QLineEdit()
         self.keywordField.editingFinished.connect(self.refreshInboxList)
         self.inboxLayout.addWidget(self.keywordLabel)
@@ -120,7 +120,7 @@ class EmailClient(QWidget):
             status, message = self.serverIMAP.fetch(num, '(RFC822)')
             emailMessage = email.message_from_bytes(message[0][1])
             subject = emailMessage['Subject']
-            subject = self.decodeSubject(subject)
+            subject = self.decodeUTF8(subject)
 
             item = QListWidgetItem(f'{subject}')
             item.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
@@ -152,9 +152,10 @@ class EmailClient(QWidget):
             status, message = self.serverIMAP.fetch(num, '(RFC822)')
             emailMessage = email.message_from_bytes(message[0][1])
             subject = emailMessage['Subject']
-            subject = self.decodeSubject(subject)
+            subject = self.decodeUTF8(subject)
 
-            if keyword in subject.lower():  # Search by keyword
+            # Intelligent filtering by keyword
+            if keyword in subject.lower():
                 item = QListWidgetItem(f'{subject}')
                 item.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
                 item.email = emailMessage
@@ -180,7 +181,7 @@ class EmailClient(QWidget):
 
             try:
                 print("Sending email...")
-                self.serverSMPT.send_message(message)
+                self.serverSMTP.send_message(message)
             except smtplib.SMTPException as e:
                 print(f'SMTP Exception: {e}')
             else:
@@ -189,10 +190,9 @@ class EmailClient(QWidget):
     # Show email in new window
     def showEmail(self, item):
         emailMessage = item.email
-        from_ = emailMessage['From']
-        to = emailMessage['To']
-        subject = emailMessage['Subject']
-        subject = self.decodeSubject(subject)
+        to = self.decodeUTF8(emailMessage['To'])
+        from_ = self.decodeUTF8(emailMessage['From'])
+        subject = self.decodeUTF8(emailMessage['Subject'])
         body = ''
 
         if emailMessage.is_multipart():
@@ -205,7 +205,6 @@ class EmailClient(QWidget):
                         body = part.get_payload(decode=True).decode()
                     elif "text/html" in contentType:
                         body = part.get_payload(decode=True).decode()
-
         else:
             body = emailMessage.get_payload(decode=True).decode()
 
@@ -219,7 +218,8 @@ class EmailClient(QWidget):
         toLabel.setText(f'<b>To:</b> {to}')
         subjectLabel = QLabel()
         subjectLabel.setText(f'<b>Subject:</b> {subject}')
-        bodyLabel = QLabel(body)
+        bodyLabel = QWebEngineView()
+        bodyLabel.setHtml(body)
 
         layout = QVBoxLayout()
         layout.addWidget(fromLabel)
@@ -230,9 +230,9 @@ class EmailClient(QWidget):
 
         window.exec()
 
-    # Decode subject (UTF-8)
+    # Decode from/to/subject (UTF-8)
     @staticmethod
-    def decodeSubject(subject):
+    def decodeUTF8(subject):
         decoded = ''.join(text if isinstance(text, str) else text.decode(charset or 'utf-8')
                           for text, charset in email.header.decode_header(subject))
         return decoded
@@ -243,12 +243,15 @@ class EmailClient(QWidget):
         message = MIMEText(self.messageField.toPlainText(), _charset='utf-8')
         message['Subject'] = self.subjectField.text()
         message['From'] = self.username
-        message['To'] = self.toField.text()
+        toAddress = self.toField.text()
+        # toAddress = toAddress.split("@")[0] + "+notify@" + toAddress.split("@")[1]
+        message['To'] = toAddress
+        # message.add_header('Disposition-Notification-To', self.username)
 
         # Connect, login and send with SMTP
         try:
             print("Sending email...")
-            self.serverSMPT.send_message(message)
+            self.serverSMTP.send_message(message)
         except smtplib.SMTPException as e:
             print(f'SMTP Exception: {e}')
         else:
