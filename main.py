@@ -4,7 +4,7 @@ import smtplib
 import imaplib
 import time
 from email.mime.text import MIMEText
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import *
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -17,15 +17,50 @@ IMAP_SERVER = 'imap.poczta.onet.pl'
 IMAP_PORT = 993
 
 
+class LoginWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('Login')
+        self.setWindowIcon(QIcon(self.style().standardPixmap(QStyle.SP_DirHomeIcon)))
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setFixedSize(250, 100)
+
+        self.emailLabel = QLabel('Email:')
+        self.emailField = QLineEdit('tmq-contact@op.pl')
+        self.passwordLabel = QLabel('Password:')
+        self.passwordField = QLineEdit('SL4bQr.w$Rq!Pj@')
+        self.passwordField.setEchoMode(QLineEdit.Password)
+        self.loginButton = QPushButton('Log in')
+
+        layout = QGridLayout()
+        layout.addWidget(self.emailLabel, 0, 0)
+        layout.addWidget(self.emailField, 0, 1)
+        layout.addWidget(self.passwordLabel, 1, 0)
+        layout.addWidget(self.passwordField, 1, 1)
+        layout.addWidget(self.loginButton, 2, 1, alignment=Qt.AlignRight)
+        self.setLayout(layout)
+
+        self.loginButton.clicked.connect(self.accept)
+
+    def getEmail(self):
+        return self.emailField.text()
+
+    def getPassword(self):
+        return self.passwordField.text()
+
+
 class EmailClient(QWidget):
-    def __init__(self, username, password, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Email Client')
         self.setWindowIcon(QIcon(self.style().standardPixmap(QStyle.SP_DirHomeIcon)))
 
-        self.username = username
-        self.password = password
-        self.model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
+        self.loginWindow = LoginWindow()
+        if self.loginWindow.exec() == QDialog.Accepted:
+            self.username = self.loginWindow.getEmail()
+            self.password = self.loginWindow.getPassword()
+        else:
+            sys.exit(0)
 
         self.serverSMTP = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         self.serverSMTP.starttls()
@@ -85,6 +120,8 @@ class EmailClient(QWidget):
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(self.tabs)
         self.setLayout(mainLayout)
+
+        self.model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
 
         self.timer = QTimer()
         self.startTimer()
@@ -260,7 +297,7 @@ class EmailClient(QWidget):
         message['To'] = toAddress
         # message.add_header('Disposition-Notification-To', self.username)
 
-        # Connect, login and send with SMTP
+        # Send with SMTP
         try:
             print("Sending email...")
             self.serverSMTP.send_message(message)
@@ -281,6 +318,6 @@ class EmailClient(QWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    client = EmailClient(username='tmq-contact@op.pl', password='SL4bQr.w$Rq!Pj@')
+    client = EmailClient()
     client.show()
     sys.exit(app.exec())
