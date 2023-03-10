@@ -11,33 +11,51 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from sentence_transformers import SentenceTransformer, util
 
 
-SMTP_SERVER = 'smtp.poczta.onet.pl'
-SMTP_PORT = 587
-IMAP_SERVER = 'imap.poczta.onet.pl'
-IMAP_PORT = 993
-
-
 class LoginWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Login')
-        self.setWindowIcon(QIcon(self.style().standardPixmap(QStyle.SP_DirHomeIcon)))
+        self.setWindowTitle('Welcome')
+        self.setWindowIcon(QIcon(self.style().standardPixmap(QStyle.SP_VistaShield)))
         self.setWindowModality(Qt.ApplicationModal)
-        self.setFixedSize(250, 100)
+        self.tabWidget = QTabWidget()
 
+        self.loginTab = QWidget()
         self.emailLabel = QLabel('Email:')
         self.emailField = QLineEdit('tmq-contact@op.pl')
         self.passwordLabel = QLabel('Password:')
         self.passwordField = QLineEdit('SL4bQr.w$Rq!Pj@')
         self.passwordField.setEchoMode(QLineEdit.Password)
-        self.loginButton = QPushButton('Log in')
 
         layout = QGridLayout()
         layout.addWidget(self.emailLabel, 0, 0)
         layout.addWidget(self.emailField, 0, 1)
         layout.addWidget(self.passwordLabel, 1, 0)
         layout.addWidget(self.passwordField, 1, 1)
-        layout.addWidget(self.loginButton, 2, 1, alignment=Qt.AlignRight)
+        self.loginTab.setLayout(layout)
+        self.tabWidget.addTab(self.loginTab, 'Login')
+
+        self.serverTab = QWidget()
+        self.smtpLabel = QLabel('SMTP server:')
+        self.smtpField = QLineEdit('smtp.poczta.onet.pl')  # smtp.pg.edu.pl
+        self.smtpPortField = QLineEdit('587')  # 465
+        self.imapLabel = QLabel('IMAP server:')
+        self.imapField = QLineEdit('imap.poczta.onet.pl')  # imap.pg.edu.pl
+        self.imapPortField = QLineEdit('993')  # 993
+
+        layout = QGridLayout()
+        layout.addWidget(self.smtpLabel, 0, 0)
+        layout.addWidget(self.smtpField, 0, 1)
+        layout.addWidget(self.smtpPortField, 0, 2)
+        layout.addWidget(self.imapLabel, 1, 0)
+        layout.addWidget(self.imapField, 1, 1)
+        layout.addWidget(self.imapPortField, 1, 2)
+        self.serverTab.setLayout(layout)
+        self.tabWidget.addTab(self.serverTab, 'SMTP/IMAP Config')
+
+        self.loginButton = QPushButton('Log in')
+        layout = QVBoxLayout()
+        layout.addWidget(self.tabWidget)
+        layout.addWidget(self.loginButton, alignment=Qt.AlignRight)
         self.setLayout(layout)
 
         self.loginButton.clicked.connect(self.accept)
@@ -48,25 +66,34 @@ class LoginWindow(QDialog):
     def getPassword(self):
         return self.passwordField.text()
 
+    def getSMTPServerInfo(self):
+        return self.smtpField.text(), int(self.smtpPortField.text())
+
+    def getIMAPServerInfo(self):
+        return self.imapField.text(), int(self.imapPortField.text())
+
 
 class EmailClient(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Email Client')
         self.setWindowIcon(QIcon(self.style().standardPixmap(QStyle.SP_DirHomeIcon)))
+        self.model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
 
         self.loginWindow = LoginWindow()
         if self.loginWindow.exec() == QDialog.Accepted:
             self.username = self.loginWindow.getEmail()
             self.password = self.loginWindow.getPassword()
+            self.smtpServer = self.loginWindow.getSMTPServerInfo()
+            self.imapServer = self.loginWindow.getIMAPServerInfo()
         else:
             sys.exit(0)
 
-        self.serverSMTP = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        self.serverSMTP = smtplib.SMTP(self.smtpServer[0], self.smtpServer[1])
         self.serverSMTP.starttls()
         self.serverSMTP.login(self.username, self.password)
 
-        self.serverIMAP = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+        self.serverIMAP = imaplib.IMAP4_SSL(self.imapServer[0], self.imapServer[1])
         self.serverIMAP.login(self.username, self.password)
         self.actualMessagesNum = self.getInitMessageNum()
 
@@ -120,8 +147,6 @@ class EmailClient(QWidget):
         mainLayout = QVBoxLayout()
         mainLayout.addWidget(self.tabs)
         self.setLayout(mainLayout)
-
-        self.model = SentenceTransformer('sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
 
         self.timer = QTimer()
         self.startTimer()
@@ -308,7 +333,6 @@ class EmailClient(QWidget):
 
             try:
                 self.serverIMAP.append('Sent', None, imaplib.Time2Internaldate(time.time()), str(message).encode('utf-8'))
-                print("Added to Sent")
             except imaplib.IMAP4.error as e:
                 print(f'IMAP Error: {e}')
 
