@@ -1,9 +1,11 @@
 import sys
+import time
 import email
 import smtplib
 import imaplib
-import time
+import ssl
 from email.mime.text import MIMEText
+from bs4 import BeautifulSoup
 from PySide6.QtGui import QIcon, Qt
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import *
@@ -36,11 +38,11 @@ class LoginWindow(QDialog):
 
         self.serverTab = QWidget()
         self.smtpLabel = QLabel('SMTP server:')
-        self.smtpField = QLineEdit('smtp.poczta.onet.pl')  # smtp.pg.edu.pl
-        self.smtpPortField = QLineEdit('587')  # 465
+        self.smtpField = QLineEdit('smtp.poczta.onet.pl')   # smtp.student.pg.edu.pl
+        self.smtpPortField = QLineEdit('587')               # 587/465
         self.imapLabel = QLabel('IMAP server:')
-        self.imapField = QLineEdit('imap.poczta.onet.pl')  # imap.pg.edu.pl
-        self.imapPortField = QLineEdit('993')  # 993
+        self.imapField = QLineEdit('imap.poczta.onet.pl')   # imap.student.pg.edu.pl
+        self.imapPortField = QLineEdit('993')               # 993
 
         layout = QGridLayout()
         layout.addWidget(self.smtpLabel, 0, 0)
@@ -93,7 +95,8 @@ class EmailClient(QWidget):
         self.serverSMTP.starttls()
         self.serverSMTP.login(self.username, self.password)
 
-        self.serverIMAP = imaplib.IMAP4_SSL(self.imapServer[0], self.imapServer[1])
+        self.serverIMAP = imaplib.IMAP4_SSL(self.imapServer[0], self.imapServer[1],
+                                            ssl_context=ssl.create_default_context().set_ciphers('DEFAULT'))
         self.serverIMAP.login(self.username, self.password)
         self.actualMessagesNum = self.getInitMessageNum()
 
@@ -111,7 +114,7 @@ class EmailClient(QWidget):
         self.toField = QLineEdit('tommikulevich@gmail.com')
         self.subjectLabel = QLabel()
         self.subjectLabel.setText(f'<b>Subject:</b>')
-        self.subjectField = QLineEdit('Attempt to send (educational purposes)')
+        self.subjectField = QLineEdit('{My Email Client} Hello world!')
         self.messageLabel = QLabel()
         self.messageLabel.setText(f'<b>Message:</b>')
         self.messageField = QTextEdit('WNO classes at Gdańsk University of Technology')
@@ -204,7 +207,6 @@ class EmailClient(QWidget):
 
         self.serverIMAP.select('inbox')
         status, messages = self.serverIMAP.search(None, 'ALL')
-        # keyword = self.keywordField.text().lower()  # Get keyword from field
         keyword = self.keywordField.text()  # Get keyword from field
 
         # Check if new messages have arrived, then send autoresponse
@@ -248,8 +250,8 @@ class EmailClient(QWidget):
             emailMessage = email.message_from_bytes(message[0][1])
             sender = email.utils.parseaddr(emailMessage['From'])[1]
 
-            message = MIMEText("For edu purposes", _charset='utf-8')
-            message['Subject'] = 'Autoresponse: Thank you for your email!'
+            message = MIMEText("WNO classes at GUT", _charset='utf-8')
+            message['Subject'] = '[Autoresponse] Thank you for your email!'
             message['From'] = self.username
             message['To'] = sender
 
@@ -279,8 +281,18 @@ class EmailClient(QWidget):
                         body = part.get_payload(decode=True).decode()
                     elif "text/html" in contentType:
                         body = part.get_payload(decode=True).decode()
+
+                        try:
+                            body = BeautifulSoup(body, 'html.parser').prettify()
+                        except:
+                            body = body.replace('\n', '<br>')
         else:
             body = emailMessage.get_payload(decode=True).decode()
+
+            try:
+                body = BeautifulSoup(body, 'html.parser').prettify()
+            except:
+                body = body.replace('\n', '<br>')
 
         window = QDialog()
         window.setWindowTitle(subject)
@@ -304,7 +316,7 @@ class EmailClient(QWidget):
 
         window.exec()
 
-    # Decode from/to/subject (UTF-8)
+    # Decode subject/from/to (UTF-8)
     @staticmethod
     def decodeUTF8(subject):
         decoded = ''.join(text if isinstance(text, str) else text.decode(charset or 'utf-8')
@@ -318,9 +330,8 @@ class EmailClient(QWidget):
         message['Subject'] = self.subjectField.text()
         message['From'] = self.username
         toAddress = self.toField.text()
-        # toAddress = toAddress.split("@")[0] + "+notify@" + toAddress.split("@")[1]
         message['To'] = toAddress
-        # message.add_header('Disposition-Notification-To', self.username)
+        message.add_header('Disposition-Notification-To', self.username)
 
         # Send with SMTP
         try:
