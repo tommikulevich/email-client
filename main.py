@@ -7,7 +7,7 @@ import smtplib
 import imaplib
 from bs4 import BeautifulSoup
 from PySide6.QtGui import QIcon, Qt
-from PySide6.QtCore import QTimer, QDate
+from PySide6.QtCore import QTimer, QDate, QDateTime, QLocale
 from PySide6.QtWidgets import *
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from sentence_transformers import SentenceTransformer, util
@@ -39,7 +39,7 @@ class LoginWindow(QDialog):
         self.serverTab = QWidget()
         self.smtpLabel = QLabel('SMTP server:')
         self.smtpField = QLineEdit('smtp.poczta.onet.pl')   # smtp.student.pg.edu.pl
-        self.smtpPortField = QLineEdit('587')               # 587/465
+        self.smtpPortField = QLineEdit('465')               # 587/465
         self.imapLabel = QLabel('IMAP server:')
         self.imapField = QLineEdit('imap.poczta.onet.pl')   # imap.student.pg.edu.pl
         self.imapPortField = QLineEdit('993')               # 993
@@ -56,7 +56,7 @@ class LoginWindow(QDialog):
 
         self.autoresponderTab = QWidget()
         self.autoresponderCheckbox = QCheckBox('Activate autoresponder')
-        self.autoresponderCheckbox.setChecked(False)
+        self.autoresponderCheckbox.setChecked(True)
         self.startLabel = QLabel('Start date:')
         self.startField = QDateEdit()
         self.startField.setCalendarPopup(True)
@@ -112,8 +112,8 @@ class EmailClient(QWidget):
         else:
             sys.exit(0)
 
-        self.serverSMTP = smtplib.SMTP(self.smtpServer[0], self.smtpServer[1])
-        self.serverSMTP.starttls()
+        self.serverSMTP = smtplib.SMTP_SSL(self.smtpServer[0], self.smtpServer[1])
+        # self.serverSMTP.starttls()
         self.serverSMTP.login(self.username, self.password)
 
         self.serverIMAP = imaplib.IMAP4_SSL(self.imapServer[0], self.imapServer[1],
@@ -162,7 +162,8 @@ class EmailClient(QWidget):
         self.tabs.addTab(self.sentTab, 'Sent')
         self.tabs.addTab(self.newMailTab, 'New email')
 
-        self.keywordLabel = QLabel('Filter:')
+        self.keywordLabel = QLabel()
+        self.keywordLabel.setText(f'Filter:  <i>(e.g. greetings, astronomy, update)</i>')
         self.keywordField = QLineEdit()
         self.keywordField.editingFinished.connect(self.refreshInboxList)
         self.inboxLayout.addWidget(self.keywordLabel)
@@ -190,11 +191,11 @@ class EmailClient(QWidget):
     # Timer to refresh email lists
     def startTimer(self):
         self.timer.timeout.connect(self.refreshEmailLists)
-        self.timer.start(30000)  # Update email lists every 30 sec
+        self.timer.start(15000)  # Update email lists every 15 sec
 
     # Refresh email lists
     def refreshEmailLists(self):
-        print("Refreshing...")
+        print(f"{QLocale(QLocale.Polish).toString(QDateTime.currentDateTime().time(), 'hh:mm:ss')} Refreshing...")
         self.refreshInboxList()
         self.refreshSentList()
 
@@ -269,9 +270,9 @@ class EmailClient(QWidget):
 
     # Send autoresponse
     def sendAutoresponse(self, messages):
-        today = QDate.currentDate()
-        startDate = self.loginWindow.startField.date().toPython()
-        endDate = self.loginWindow.endField.date().toPython()
+        today = QDate.currentDate().toString('dd-MM-yyyy')
+        startDate = self.loginWindow.startField.date().toPython().strftime('%d-%m-%Y')
+        endDate = self.loginWindow.endField.date().toPython().strftime('%d-%m-%Y')
 
         if startDate <= today <= endDate:
             for num in messages[0].split()[self.actualMessagesNum:]:
@@ -279,10 +280,12 @@ class EmailClient(QWidget):
                 emailMessage = email.message_from_bytes(message[0][1])
                 sender = email.utils.parseaddr(emailMessage['From'])[1]
 
-                message = MIMEText("WNO classes at GUT", _charset='utf-8')
-                message['Subject'] = '[Autoresponse] Thank you for your email!'
+                message = MIMEText("Thank you for your email!", _charset='utf-8')
+                message['Subject'] = f'[Autoresponse] Vacation: from {startDate} to {endDate}'
                 message['From'] = self.username
                 message['To'] = sender
+                message.add_header('Disposition-Notification-To', self.username)
+                message.add_header('Message-ID', email.utils.make_msgid())
 
                 try:
                     print("Sending email...")
@@ -326,7 +329,7 @@ class EmailClient(QWidget):
     def showEmail(self, item):
         emailMessage = item.email
         to = self.decodeUTF8(emailMessage['To'])
-        from_ = self.decodeUTF8(emailMessage['From'])
+        from_ = self.decodeUTF8(email.utils.parseaddr(emailMessage['From'])[1])
         subject = self.decodeUTF8(emailMessage['Subject'])
         body = ''
 
