@@ -1,13 +1,13 @@
 import sys
 import time
+import ssl
 import email
+from email.mime.text import MIMEText
 import smtplib
 import imaplib
-import ssl
-from email.mime.text import MIMEText
 from bs4 import BeautifulSoup
 from PySide6.QtGui import QIcon, Qt
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QDate
 from PySide6.QtWidgets import *
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from sentence_transformers import SentenceTransformer, util
@@ -53,6 +53,27 @@ class LoginWindow(QDialog):
         layout.addWidget(self.imapPortField, 1, 2)
         self.serverTab.setLayout(layout)
         self.tabWidget.addTab(self.serverTab, 'SMTP/IMAP Config')
+
+        self.autoresponderTab = QWidget()
+        self.autoresponderCheckbox = QCheckBox('Activate autoresponder')
+        self.autoresponderCheckbox.setChecked(False)
+        self.startLabel = QLabel('Start date:')
+        self.startField = QDateEdit()
+        self.startField.setCalendarPopup(True)
+        self.startField.setDate(QDate.currentDate())
+        self.endLabel = QLabel('End date:')
+        self.endField = QDateEdit()
+        self.endField.setCalendarPopup(True)
+        self.endField.setDate(QDate.currentDate().addDays(7))
+
+        layout = QGridLayout()
+        layout.addWidget(self.autoresponderCheckbox, 0, 0, 1, 2)
+        layout.addWidget(self.startLabel, 1, 0)
+        layout.addWidget(self.startField, 1, 1)
+        layout.addWidget(self.endLabel, 2, 0)
+        layout.addWidget(self.endField, 2, 1)
+        self.autoresponderTab.setLayout(layout)
+        self.tabWidget.addTab(self.autoresponderTab, 'Autoresponder')
 
         self.loginButton = QPushButton('Log in')
         layout = QVBoxLayout()
@@ -173,6 +194,7 @@ class EmailClient(QWidget):
 
     # Refresh email lists
     def refreshEmailLists(self):
+        print("Refreshing...")
         self.refreshInboxList()
         self.refreshSentList()
 
@@ -209,11 +231,13 @@ class EmailClient(QWidget):
         status, messages = self.serverIMAP.search(None, 'ALL')
         keyword = self.keywordField.text()  # Get keyword from field
 
-        # Check if new messages have arrived, then send autoresponse
-        newMessagesNum = len(messages[0].split())
-        if newMessagesNum > self.actualMessagesNum:
-            self.sendAutoresponse(messages)
-            self.actualMessagesNum = newMessagesNum  # Update the number of actual messages
+        # [Autoresponder: On] Check if new messages have arrived, then send autoresponse
+
+        if self.loginWindow.autoresponderCheckbox.isChecked():
+            newMessagesNum = len(messages[0].split())
+            if newMessagesNum > self.actualMessagesNum:
+                self.sendAutoresponse(messages)
+                self.actualMessagesNum = newMessagesNum  # Update the number of actual messages
 
         items = []
         for num in messages[0].split():
@@ -231,7 +255,7 @@ class EmailClient(QWidget):
             else:
                 score = 1
 
-            if score > 0.45:
+            if score > 0.4:
                 item = QListWidgetItem(f'{subject}')
                 item.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
                 item.email = emailMessage
@@ -245,23 +269,58 @@ class EmailClient(QWidget):
 
     # Send autoresponse
     def sendAutoresponse(self, messages):
-        for num in messages[0].split()[self.actualMessagesNum:]:
-            status, message = self.serverIMAP.fetch(num, '(RFC822)')
-            emailMessage = email.message_from_bytes(message[0][1])
-            sender = email.utils.parseaddr(emailMessage['From'])[1]
+        today = QDate.currentDate()
+        startDate = self.loginWindow.startField.date().toPython()
+        endDate = self.loginWindow.endField.date().toPython()
 
-            message = MIMEText("WNO classes at GUT", _charset='utf-8')
-            message['Subject'] = '[Autoresponse] Thank you for your email!'
-            message['From'] = self.username
-            message['To'] = sender
+        if startDate <= today <= endDate:
+            for num in messages[0].split()[self.actualMessagesNum:]:
+                status, message = self.serverIMAP.fetch(num, '(RFC822)')
+                emailMessage = email.message_from_bytes(message[0][1])
+                sender = email.utils.parseaddr(emailMessage['From'])[1]
+
+                message = MIMEText("WNO classes at GUT", _charset='utf-8')
+                message['Subject'] = '[Autoresponse] Thank you for your email!'
+                message['From'] = self.username
+                message['To'] = sender
+
+                try:
+                    print("Sending email...")
+                    self.serverSMTP.send_message(message)
+                except smtplib.SMTPException as e:
+                    print(f'SMTP Exception: {e}')
+                else:
+                    print('Autoresponse sent successfully to:', sender)
+        else:
+            print('Autoresponse not sent! Today is outside provided date range')
+
+    # Send message using SMTP
+    def sendEmail(self):
+        # Email details from GUI fields
+        message = MIMEText(self.messageField.toPlainText(), _charset='utf-8')
+        message['Subject'] = self.subjectField.text()
+        message['From'] = self.username
+        message['To'] = self.toField.text()
+        message.add_header('Disposition-Notification-To', self.username)
+        message.add_header('Message-ID', email.utils.make_msgid())
+
+        # Send with SMTP
+        try:
+            print("Sending email...")
+            self.serverSMTP.send_message(message)
+        except smtplib.SMTPException as e:
+            print(f'SMTP Exception: {e}')
+        else:
+            print('Email sent successfully!')
 
             try:
-                print("Sending email...")
-                self.serverSMTP.send_message(message)
-            except smtplib.SMTPException as e:
-                print(f'SMTP Exception: {e}')
-            else:
-                print('Autoresponse sent successfully to:', sender)
+                self.serverIMAP.append('Sent', None, imaplib.Time2Internaldate(time.time()),
+                                       str(message).encode('utf-8'))
+            except imaplib.IMAP4.error as e:
+                print(f'IMAP Error: {e}')
+
+        # Refresh sent list
+        self.refreshSentList()
 
     # Show email in new window
     def showEmail(self, item):
@@ -322,33 +381,6 @@ class EmailClient(QWidget):
         decoded = ''.join(text if isinstance(text, str) else text.decode(charset or 'utf-8')
                           for text, charset in email.header.decode_header(subject))
         return decoded
-
-    # Send message using SMTP
-    def sendEmail(self):
-        # Email details from GUI fields
-        message = MIMEText(self.messageField.toPlainText(), _charset='utf-8')
-        message['Subject'] = self.subjectField.text()
-        message['From'] = self.username
-        toAddress = self.toField.text()
-        message['To'] = toAddress
-        message.add_header('Disposition-Notification-To', self.username)
-
-        # Send with SMTP
-        try:
-            print("Sending email...")
-            self.serverSMTP.send_message(message)
-        except smtplib.SMTPException as e:
-            print(f'SMTP Exception: {e}')
-        else:
-            print('Email sent successfully!')
-
-            try:
-                self.serverIMAP.append('Sent', None, imaplib.Time2Internaldate(time.time()), str(message).encode('utf-8'))
-            except imaplib.IMAP4.error as e:
-                print(f'IMAP Error: {e}')
-
-        # Refresh sent list
-        self.refreshSentList()
 
 
 if __name__ == '__main__':
