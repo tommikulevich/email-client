@@ -113,7 +113,6 @@ class EmailClient(QWidget):
             sys.exit(0)
 
         self.serverSMTP = smtplib.SMTP_SSL(self.smtpServer[0], self.smtpServer[1])
-        # self.serverSMTP.starttls()
         self.serverSMTP.login(self.username, self.password)
 
         self.serverIMAP = imaplib.IMAP4_SSL(self.imapServer[0], self.imapServer[1],
@@ -158,9 +157,17 @@ class EmailClient(QWidget):
         self.inboxLayout.addWidget(self.inboxList)
         self.inboxTab.setLayout(self.inboxLayout)
 
+        self.logoutTab = QWidget()
+        self.logoutLayout = QVBoxLayout()
+        self.logoutButton = QPushButton('Logout')
+        self.logoutButton.clicked.connect(self.logOut)
+        self.logoutLayout.addWidget(self.logoutButton)
+        self.logoutTab.setLayout(self.logoutLayout)
+
         self.tabs.addTab(self.inboxTab, 'Inbox')
         self.tabs.addTab(self.sentTab, 'Sent')
         self.tabs.addTab(self.newMailTab, 'New email')
+        self.tabs.addTab(self.logoutTab, 'Logout')
 
         self.keywordLabel = QLabel()
         self.keywordLabel.setText(f'Filter:  <i>(e.g. greetings, astronomy, update)</i>')
@@ -182,16 +189,23 @@ class EmailClient(QWidget):
         self.refreshSentList()
         self.refreshInboxList()
 
+    # Logout
+    def logOut(self):
+        self.serverSMTP.quit()
+        self.serverIMAP.logout()
+        self.close()
+
     # Count messages when user starts client
     def getInitMessageNum(self):
         self.serverIMAP.select('inbox')
         status, messages = self.serverIMAP.search(None, 'ALL')
+
         return len(messages[0].split())
 
     # Timer to refresh email lists
     def startTimer(self):
         self.timer.timeout.connect(self.refreshEmailLists)
-        self.timer.start(15000)  # Update email lists every 15 sec
+        self.timer.start(30000)  # Update email lists every 20 sec
 
     # Refresh email lists
     def refreshEmailLists(self):
@@ -233,15 +247,14 @@ class EmailClient(QWidget):
         keyword = self.keywordField.text()  # Get keyword from field
 
         # [Autoresponder: On] Check if new messages have arrived, then send autoresponse
-
         if self.loginWindow.autoresponderCheckbox.isChecked():
             newMessagesNum = len(messages[0].split())
-            if newMessagesNum > self.actualMessagesNum:
-                self.sendAutoresponse(messages)
-                self.actualMessagesNum = newMessagesNum  # Update the number of actual messages
 
-        items = []
-        for num in messages[0].split():
+        if newMessagesNum > self.actualMessagesNum:
+            self.sendAutoresponse(messages)
+            self.actualMessagesNum = newMessagesNum  # Update the number of actual messages
+
+        for num in messages[0].split()[::-1]:
             status, message = self.serverIMAP.fetch(num, '(RFC822)')
             emailMessage = email.message_from_bytes(message[0][1])
             subject = emailMessage['Subject']
@@ -263,10 +276,7 @@ class EmailClient(QWidget):
                 item.from_ = emailMessage['From']
                 item.to = emailMessage['To']
 
-                items.append(item)
-
-        for item in items[::-1]:
-            self.inboxList.addItem(item)
+                self.inboxList.addItem(item)
 
     # Send autoresponse
     def sendAutoresponse(self, messages):
