@@ -1,3 +1,7 @@
+# Simple Email Client
+# Author: Tomash Mikulevich
+# Created with: PyCharm 2022.2.4 (Professional Edition) | Python 3.10.9 (WinPython 3.10 Release 2022-04)
+
 import sys
 import time
 import ssl
@@ -23,9 +27,9 @@ class LoginWindow(QDialog):
 
         self.loginTab = QWidget()
         self.emailLabel = QLabel('Email:')
-        self.emailField = QLineEdit('tmq-contact@op.pl')
+        self.emailField = QLineEdit()
         self.passwordLabel = QLabel('Password:')
-        self.passwordField = QLineEdit('SL4bQr.w$Rq!Pj@')
+        self.passwordField = QLineEdit()
         self.passwordField.setEchoMode(QLineEdit.Password)
 
         layout = QGridLayout()
@@ -38,11 +42,11 @@ class LoginWindow(QDialog):
 
         self.serverTab = QWidget()
         self.smtpLabel = QLabel('SMTP server:')
-        self.smtpField = QLineEdit('smtp.poczta.onet.pl')   # smtp.student.pg.edu.pl
-        self.smtpPortField = QLineEdit('465')               # 587/465
+        self.smtpField = QLineEdit()
+        self.smtpPortField = QLineEdit('000')
         self.imapLabel = QLabel('IMAP server:')
-        self.imapField = QLineEdit('imap.poczta.onet.pl')   # imap.student.pg.edu.pl
-        self.imapPortField = QLineEdit('993')               # 993
+        self.imapField = QLineEdit()
+        self.imapPortField = QLineEdit('000')
 
         layout = QGridLayout()
         layout.addWidget(self.smtpLabel, 0, 0)
@@ -112,12 +116,44 @@ class EmailClient(QWidget):
         else:
             sys.exit(0)
 
-        self.serverSMTP = smtplib.SMTP_SSL(self.smtpServer[0], self.smtpServer[1])
-        self.serverSMTP.login(self.username, self.password)
+        error = False
+        message = ''
+        try:
+            self.serverSMTP = smtplib.SMTP_SSL(self.smtpServer[0], self.smtpServer[1])
+            self.serverSMTP.login(self.username, self.password)
+        except smtplib.SMTPAuthenticationError as e:
+            error = True
+            message = f'SMTP Authentication Error: {e}'
+            print(message)
+        except smtplib.SMTPConnectError as e:
+            error = True
+            message = f'SMTP Connection Error: {e}'
+            print(message)
+        except smtplib.SMTPException as e:
+            error = True
+            message = f'SMTP Exception: {e}'
+            print(message)
 
-        self.serverIMAP = imaplib.IMAP4_SSL(self.imapServer[0], self.imapServer[1],
-                                            ssl_context=ssl.create_default_context().set_ciphers('DEFAULT'))
-        self.serverIMAP.login(self.username, self.password)
+        try:
+            self.serverIMAP = imaplib.IMAP4_SSL(self.imapServer[0], self.imapServer[1],
+                                                ssl_context=ssl.create_default_context().set_ciphers('DEFAULT'))
+            self.serverIMAP.login(self.username, self.password)
+        except imaplib.IMAP4.error as e:
+            error = True
+            message = f'IMAP Error: {e}'
+            print(message)
+
+        if error:
+            errorMessage = QMessageBox()
+            errorMessage.setWindowIcon(QIcon(self.style().standardPixmap(QStyle.SP_MessageBoxCritical)))
+            errorMessage.setIcon(QMessageBox.Critical)
+            errorMessage.setText("Error")
+            errorMessage.setInformativeText(message)
+            errorMessage.setWindowTitle("Warning")
+            errorMessage.exec()
+
+            exit(0)
+
         self.actualMessagesNum = self.getInitMessageNum()
 
         self.tabs = QTabWidget()
@@ -131,13 +167,13 @@ class EmailClient(QWidget):
 
         self.toLabel = QLabel()
         self.toLabel.setText(f'<b>To:</b>')
-        self.toField = QLineEdit('tommikulevich@gmail.com')
+        self.toField = QLineEdit()
         self.subjectLabel = QLabel()
         self.subjectLabel.setText(f'<b>Subject:</b>')
-        self.subjectField = QLineEdit('{My Email Client} Hello world!')
+        self.subjectField = QLineEdit()
         self.messageLabel = QLabel()
         self.messageLabel.setText(f'<b>Message:</b>')
-        self.messageField = QTextEdit('WNO classes at Gdańsk University of Technology')
+        self.messageField = QTextEdit()
         self.sendButton = QPushButton('Send')
 
         self.sentList = QListWidget()
